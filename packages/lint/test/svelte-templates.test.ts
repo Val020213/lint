@@ -113,6 +113,16 @@ describe("Svelte templates", () => {
     ])
   })
 
+  it("accepts a color function over one theme variable", () => {
+    expect(
+      found(
+        `<svg><path fill="oklch(var(--primary-oklch))" stroke="oklch(var(--border-oklch) / 0.2)" /></svg><div style="--tone: oklch(var(--ct-oklch)); --edge: oklch(var(--x, 0.5 0.1 200))"></div>`
+      )
+    ).toEqual([
+      "shadcn/no-inline-styles: Custom property --edge hardcodes a color",
+    ])
+  })
+
   it("keeps a ; inside a quoted or parenthesized style value", () => {
     expect(
       found(
@@ -250,5 +260,19 @@ describe("Svelte 5 runes", () => {
       "shadcn/require-static-classes: Dynamically built className on <Button> cannot be checked",
       "shadcn/no-inline-styles: Dynamic style object cannot be checked",
     ])
+  })
+})
+
+describe("SVG color attributes in Svelte markup", () => {
+  it("reads the hyphenated stop-color and flood-color names", () => {
+    expect(
+      found(
+        `<svg><linearGradient id="g"><stop stop-color="#f00" /></linearGradient><filter id="f"><feFlood flood-color="#00f" /></filter></svg>`
+      )
+    ).toEqual([
+      `shadcn/no-raw-colors: stop-color="#f00" hardcodes a color`,
+      `shadcn/no-raw-colors: flood-color="#00f" hardcodes a color`,
+    ])
+    expect(found(`<svg><stop stop-color="currentColor" /></svg>`)).toEqual([])
   })
 })
