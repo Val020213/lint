@@ -4,6 +4,7 @@
 
 import * as fs from "node:fs"
 import * as path from "node:path"
+import type { ConfigExtension } from "cn/compiler"
 
 import { normalizeClass, OPACITY_MODIFIER } from "../grammar/classes"
 import { parseColor, type Lab } from "../grammar/colors"
@@ -12,6 +13,7 @@ import { FONT_SIZES, RADII } from "../grammar/tailwind-theme"
 import { projectFor } from "./components-json"
 import { isFile, mtimeOf, TTL } from "./fs"
 import { packageRoot, resolveFile } from "./resolve"
+import { themeScalesOf } from "./theme-scales"
 import { warnOnce } from "./warn"
 
 export type ScaleKind = "radius" | "text"
@@ -41,6 +43,9 @@ type ThemeRead = {
   // Every custom property the project declares, in light mode, last
   // declaration winning: what tokens resolve to.
   values: Map<string, string>
+  // The values above that only a scoped selector such as `.compact`
+  // sets. A `:root` or `@theme` value replaces them.
+  scopedNames: Set<string>
   themeNames: Set<string>
   // In cascade order, resets included: what the scales are built from.
   declarations: Declaration[]
@@ -56,6 +61,7 @@ type ThemeRead = {
   missingImports: { spec: string; fromDir: string; rootDir: string }[]
   colors?: Map<string, Lab>
   scales?: Record<ScaleKind, Map<string, number>>
+  themeScales?: ConfigExtension
   spacing?: number | null
   vocabulary?: ThemeVocabulary
 }
@@ -165,14 +171,20 @@ function applyTokenDeclarations(
 const DARK_PRELUDE =
   /\.dark(?![\w-])|prefers-color-scheme\s*:\s*dark|data-(?:theme|mode)=["']?dark|@variant\s+dark\b/
 
+// `:root, :host` is how Tailwind writes its own theme.
+const ROOT_SELECTOR = /^(?::root|html|:host)$/
+
 // Dark-mode blocks are skipped, so the values are the light theme's.
-// Later declarations win, as in CSS.
+// Later declarations win, as in CSS, but a value set under `:root` or
+// `@theme` wins over one a scoped selector such as `.compact` sets: the
+// scoped value applies only inside that selector.
 export function parseDeclarations(css: string) {
   const values = new Map<string, string>()
+  const scopedNames = new Set<string>()
   const themeNames = new Set<string>()
   const declarations: { name: string; value: string; theme: boolean }[] = []
   const stripped = stripComments(css)
-  const stack: { theme: boolean; dark: boolean }[] = []
+  const stack: { theme: boolean; dark: boolean; scoped: boolean }[] = []
   let start = 0
   for (let i = 0; i < stripped.length; i++) {
     const char = stripped[i]
@@ -182,6 +194,10 @@ export function parseDeclarations(css: string) {
       stack.push({
         theme: (outer?.theme ?? false) || /^@theme\b/.test(prelude),
         dark: (outer?.dark ?? false) || DARK_PRELUDE.test(prelude),
+        scoped:
+          (outer?.scoped ?? false) ||
+          (!prelude.startsWith("@") &&
+            !prelude.split(",").every((s) => ROOT_SELECTOR.test(s.trim()))),
       })
       start = i + 1
     } else if (char === "}" || char === ";") {
@@ -191,7 +207,12 @@ export function parseDeclarations(css: string) {
       )
       const scope = stack[stack.length - 1]
       if (match && !scope?.dark) {
-        values.set(match[1], match[2])
+        const scoped = scope?.scoped ?? false
+        if (!scoped || !values.has(match[1]) || scopedNames.has(match[1])) {
+          values.set(match[1], match[2])
+          if (scoped) scopedNames.add(match[1])
+          else scopedNames.delete(match[1])
+        }
         if (scope?.theme) themeNames.add(match[1])
         declarations.push({
           name: match[1],
@@ -203,7 +224,7 @@ export function parseDeclarations(css: string) {
       start = i + 1
     }
   }
-  return { values, themeNames, declarations }
+  return { values, scopedNames, themeNames, declarations }
 }
 
 // Null when a variable has no value and no fallback.
@@ -330,8 +351,9 @@ function ownPackageOf(
   return dir === current ? dir : null
 }
 
-// Files under node_modules contribute @utility names and class selectors
-// (tw-animate-css declares animate-in that way) but not color tokens:
+// Files under node_modules contribute @utility names, class selectors and
+// @theme animations (tw-animate-css declares fade-in and animate-in those
+// ways) but not color tokens:
 // Tailwind's own palette is not the project's vocabulary. Workspace
 // packages resolve past node_modules and count as the project's own, and
 // so does a design system published as a package once themeImports
@@ -383,11 +405,26 @@ function readTheme(
     )
   }
   if (!fromPackage) {
-    const { values, themeNames, declarations } = parseDeclarations(css)
+    const { values, scopedNames, themeNames, declarations } =
+      parseDeclarations(css)
     applyTokenDeclarations(declarations, read.tokens, read.scoped)
-    for (const [name, value] of values) read.values.set(name, value)
+    for (const [name, value] of values) {
+      const scoped = scopedNames.has(name)
+      if (scoped && read.values.has(name) && !read.scopedNames.has(name)) {
+        continue
+      }
+      read.values.set(name, value)
+      if (scoped) read.scopedNames.add(name)
+      else read.scopedNames.delete(name)
+    }
     for (const name of themeNames) read.themeNames.add(name)
     read.declarations.push(...declarations)
+  } else if (css.includes("--animate-")) {
+    // A package's own @theme animations are generated all the same:
+    // tw-animate-css declares --animate-in there.
+    for (const name of parseDeclarations(css).themeNames) {
+      if (name.startsWith("animate-")) read.themeNames.add(name)
+    }
   }
 }
 
@@ -443,6 +480,7 @@ function themeAt(cssFile: string, imports: readonly RegExp[] = NO_IMPORTS) {
     utilities: new Map(),
     classes: new Set(),
     values: new Map(),
+    scopedNames: new Set(),
     themeNames: new Set(),
     declarations: [],
     tailwind: false,
@@ -709,6 +747,18 @@ export function scaleFor(fromFile: string, kind: ScaleKind) {
   const cssFile = themeFileFor(fromFile)
   if (!cssFile) return DEFAULT_SCALES[kind]
   return scaleOf(themeOf(fromFile, cssFile), kind)
+}
+
+// The scales the theme declares, as a cn config extension. One object
+// per theme read, so callers can memo against its identity. Null when the
+// project has no theme to read.
+export function themeScalesFor(fromFile: string) {
+  const cssFile = themeFileFor(fromFile)
+  if (!cssFile) {
+    return null
+  }
+  const read = themeOf(fromFile, cssFile)
+  return (read.themeScales ??= themeScalesOf(read.declarations))
 }
 
 // Null when the project has no theme to read.

@@ -143,8 +143,11 @@ A nested namespace resolves the same way. With `export * as Button from
 | `{...{ class: "p-4" }}`            | a spread                               |
 | `style="color: red"`               | a style, property by property          |
 | `style:color={tone}`               | a style directive                      |
+| `<Button --tone="red">`            | a custom property set on a component   |
 
-A variable in the markup resolves to the script, one hop deep.
+A variable in the markup resolves to the script, one hop deep. A
+`$derived(expr)` binding resolves to `expr`, so a reactive class or style
+value is read like a plain `const`. `$derived.by(fn)` is not followed.
 
 **Variants** come from `tv` and `cva` in the component's scripts,
 including `<script module>`.

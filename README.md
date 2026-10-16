@@ -289,6 +289,7 @@ See [contracts and custom messages](https://github.com/shadcn-ui/lint/blob/main/
 ## Get started
 
 Requires Node.js 20.19 or later and a version supported by your linter.
+Bun 1.3 or later works too, with `bun lint` or `bun --bun lint`.
 
 ### React
 

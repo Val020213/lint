@@ -12,7 +12,11 @@ import {
 import { componentsFor } from "../project/components"
 import { NODE_MODULES } from "../project/fs"
 import { definingExportOf, type ExportBinding } from "../project/modules"
-import { wrapperTargetOf, type WrapperTarget } from "../project/wrappers"
+import {
+  wrapperPropOf,
+  wrapperTargetOf,
+  type WrapperTarget,
+} from "../project/wrappers"
 import { fileOf } from "../rules/messages"
 import { withSettings } from "../rules/settings"
 import {
@@ -132,8 +136,10 @@ export function createComponentTracker(
   const wrapperOf = (
     key: string,
     binding: ExportBinding | null,
-    local: string | null
+    local: string | null,
+    prop: string
   ) => {
+    key = `${key}|${prop}`
     const cached = wrappers.get(key)
     if (cached !== undefined) return cached
     let target: WrapperTarget | null = null
@@ -144,7 +150,8 @@ export function createComponentTracker(
           binding.name,
           patterns,
           undefined,
-          ui
+          ui,
+          prop
         )
       }
     } else if (local && filename && /^[A-Z]/.test(local)) {
@@ -153,7 +160,8 @@ export function createComponentTracker(
         local,
         patterns,
         context.sourceCode?.ast,
-        ui
+        ui,
+        prop
       )
     }
     wrappers.set(key, target)
@@ -163,8 +171,13 @@ export function createComponentTracker(
   // Resolution first, name second: an import into the ui directory is
   // that component whatever it was renamed to, and one into a package is
   // not, however familiar. Only an unresolvable import falls back to the
-  // name, so a broken alias degrades rather than going silent.
-  const resolveName = (element: ElementName | null): ResolvedElement | null => {
+  // name, so a broken alias degrades rather than going silent. A wrapper
+  // is followed by the class attribute set on it: its `headerClassName`
+  // goes wherever the wrapper hands that prop, not where className goes.
+  const resolveName = (
+    element: ElementName | null,
+    attribute = "className"
+  ): ResolvedElement | null => {
     if (!element) return null
     // Vue writes an imported CardTitle as `<card-title>` too.
     const root =
@@ -189,7 +202,12 @@ export function createComponentTracker(
       if (binding) {
         if (NODE_MODULES.test(binding.file)) return null
         if (property !== null && !imported.namespace) return null
-        const target = wrapperOf(`${root}.${exportName}`, binding, null)
+        const target = wrapperOf(
+          `${root}.${exportName}`,
+          binding,
+          null,
+          wrapperPropOf(attribute)
+        )
         if (!target) return null
         const wrapper = property === null ? name : `${root}.${property}`
         return { component: target.component, file: target.file, wrapper }
@@ -221,7 +239,7 @@ export function createComponentTracker(
       }
     }
     if (property !== null) return null
-    const target = wrapperOf(root, null, root)
+    const target = wrapperOf(root, null, root, wrapperPropOf(attribute))
     return target
       ? { component: target.component, file: target.file, wrapper: name }
       : null
@@ -484,6 +502,22 @@ function projectStatic(init: any, steps: PatternStep[]) {
   return { init: node, steps: steps.slice(i) }
 }
 
+// Svelte 5 writes a reactive value as `$derived(expr)`, which has the
+// value of `expr`. `$derived.by(fn)` is a function and stays unread.
+function derivedValueOf(init: any) {
+  const call = unwrapTs(init)
+  if (
+    call?.type !== "CallExpression" ||
+    call.callee?.type !== "Identifier" ||
+    call.callee.name !== "$derived" ||
+    call.arguments?.length !== 1 ||
+    call.arguments[0].type === "SpreadElement"
+  ) {
+    return init
+  }
+  return call.arguments[0]
+}
+
 // One hop to a same-file const's initializer. `path` holds the variables
 // on the current route, so a self-reference stops while the same variable
 // read from both branches of a ternary resolves twice. A destructured
@@ -495,7 +529,7 @@ export function resolveIdentifier(node: any, context: any, path: Set<any>) {
   const def = variable.defs?.[0]
   if (!def || def.type !== "Variable" || !def.node?.init) return null
   if (isWritten(variable)) return null
-  let init = def.node.init
+  let init = derivedValueOf(def.node.init)
   let steps: PatternStep[] = []
   if (def.name !== def.node.id) {
     const route = patternStepsOf(def.name, def.node.id)
@@ -1154,6 +1188,17 @@ function sharedFor(context: any, options: SiteOptions): Shared {
   return shared
 }
 
+// Nodes whose noncomputed string key is a name, not a value.
+const PROPERTY_KEY_PARENTS = new Set([
+  "Property",
+  "PropertyDefinition",
+  "MethodDefinition",
+  "AccessorProperty",
+  "TSPropertySignature",
+  "TSAbstractPropertyDefinition",
+  "TSAbstractMethodDefinition",
+])
+
 // Calls `onSite` for every class site in the file.
 export function classSiteVisitors(
   context: any,
@@ -1191,21 +1236,22 @@ export function classSiteVisitors(
   // classes, so the component itself judges them: `<Button
   // render={<a />} className="p-4" />` is a Button, and so is the `<a>`
   // when the classes are written on it instead.
-  const resolvedOf = (element: any) => {
+  const resolvedOf = (element: any, attribute = "className") => {
     if (!element) return null
     const rendered = reader.renderedElementOf?.(element)
-    const resolved = rendered && tracker.resolveName(reader.nameOf(rendered))
+    const resolved =
+      rendered && tracker.resolveName(reader.nameOf(rendered), attribute)
     if (resolved) {
       return {
         ...resolved,
         wrapper: resolved.wrapper ?? reader.nameOf(element)?.text ?? "",
       }
     }
-    const own = tracker.resolveName(reader.nameOf(element))
+    const own = tracker.resolveName(reader.nameOf(element), attribute)
     if (own) return own
     const owner = reader.parentElementOf(element)
     return owner && reader.renderedElementOf?.(owner) === element
-      ? tracker.resolveName(reader.nameOf(owner))
+      ? tracker.resolveName(reader.nameOf(owner), attribute)
       : null
   }
 
@@ -1272,12 +1318,13 @@ export function classSiteVisitors(
     let list = sites.get(node)
     if (list) return list
     const element = reader.elementOf(node)
+    const attribute = reader.attributeName(node)
     list = [
       siteFor(
         node,
         reader.attributeValue(node),
-        reader.attributeName(node),
-        resolvedOf(element),
+        attribute,
+        resolvedOf(element, attribute),
         element
       ),
     ]
@@ -1298,7 +1345,6 @@ export function classSiteVisitors(
     )
     if (object) {
       const element = reader.elementOf(node)
-      const resolved = resolvedOf(element)
       const finals = new Map<string, any>()
       for (const entry of objectEntries(object, context, new Set())) {
         if ("key" in entry && isClassAttribute(entry.key)) {
@@ -1306,7 +1352,7 @@ export function classSiteVisitors(
         }
       }
       for (const [key, value] of finals) {
-        list.push(siteFor(value, value, key, resolved, element))
+        list.push(siteFor(value, value, key, resolvedOf(element, key), element))
       }
     }
     sites.set(node, list)
@@ -1377,6 +1423,14 @@ export function classSiteVisitors(
               return
             if (reportedStrings.has(node) || claimedVocabulary.has(node)) return
             if (node.parent?.type === "ImportDeclaration") return
+            // A plain key names an API field, not a class. Class object keys
+            // (cn({ "bg-red-500": on })) are reached by their class site.
+            if (
+              PROPERTY_KEY_PARENTS.has(node.parent?.type) &&
+              node.parent.key === node &&
+              !node.parent.computed
+            )
+              return
             const strings = [{ value: node.value, node }]
             emit({
               contextualStrings: strings,
