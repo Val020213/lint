@@ -115,6 +115,14 @@ export const svelteReader: TemplateReader = {
     },
   },
   styleProperties: {
+    // `<Button --tone="red">` sets a custom property on the component;
+    // Svelte compiles it to an inline style on a wrapper.
+    SvelteAttribute(node) {
+      const name = node.key?.name
+      return typeof name === "string" && name.startsWith("--")
+        ? { property: name, value: valueOf(node) ?? node.key }
+        : null
+    },
     // `style:color={value}` sets one property.
     SvelteStyleDirective(node) {
       const property = node.key?.name?.name

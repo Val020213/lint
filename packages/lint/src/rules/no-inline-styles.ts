@@ -495,7 +495,7 @@ export const noInlineStyles = {
       })
     }
     for (const [type, read] of Object.entries(reader.styleProperties ?? {})) {
-      visitors[type] = (node: any) => {
+      addVisitor(visitors, type, (node: any) => {
         const style = read(node)
         if (!style) return
         const value = isContainer(style.value)
@@ -508,7 +508,7 @@ export const noInlineStyles = {
           elementName(node),
           text ?? undefined
         )
-      }
+      })
     }
     // {...{ style }} and {...props}: the style property is judged like
     // the attribute.

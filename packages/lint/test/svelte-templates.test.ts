@@ -227,6 +227,27 @@ describe("Svelte templates", () => {
   })
 })
 
+describe("CSS custom properties passed to a component", () => {
+  it('reads <Button --tone="red"> like a style declaration', () => {
+    expect(found(`<Button --tone="red">Save</Button>`)).toEqual([
+      "shadcn/no-inline-styles: Custom property --tone hardcodes a color",
+    ])
+    expect(
+      found(`<Button --tone="oklch(0.6 0.1 20)" --size={tone}>Save</Button>`)
+    ).toEqual([
+      "shadcn/no-inline-styles: Custom property --tone hardcodes a color",
+    ])
+  })
+
+  it("accepts a token or a dynamic value", () => {
+    expect(
+      found(
+        `<Button --tone="var(--color-primary)" --gap="4px" --ring={tone}>Save</Button>`
+      )
+    ).toEqual([])
+  })
+})
+
 describe("Svelte 5 runes", () => {
   const runes =
     'let active = $state(true);\n  let width = $state(40);\n  const classes = $derived(active ? "p-4" : "p-2");\n  const box = $derived(`width: ${width}px`);'
