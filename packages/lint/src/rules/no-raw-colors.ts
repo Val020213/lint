@@ -47,14 +47,17 @@ const FIXED = new Set(["white", "black"])
 // SVG paint takes none: fill-none and stroke-none paint nothing.
 const PAINT_PREFIXES = new Set(["fill-", "stroke-"])
 
-// JSX attributes that take a color directly.
+// Attributes that take a color directly, as JSX and as markup spell them.
 const COLOR_ATTRIBUTES = new Set([
   "fill",
   "stroke",
   "color",
   "stopColor",
+  "stop-color",
   "floodColor",
+  "flood-color",
   "lightingColor",
+  "lighting-color",
 ])
 
 // Attribute values that defer to the cascade or to a token.

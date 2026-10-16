@@ -226,3 +226,17 @@ describe("Svelte templates", () => {
     ).toHaveLength(1)
   })
 })
+
+describe("SVG color attributes in Svelte markup", () => {
+  it("reads the hyphenated stop-color and flood-color names", () => {
+    expect(
+      found(
+        `<svg><linearGradient id="g"><stop stop-color="#f00" /></linearGradient><filter id="f"><feFlood flood-color="#00f" /></filter></svg>`
+      )
+    ).toEqual([
+      `shadcn/no-raw-colors: stop-color="#f00" hardcodes a color`,
+      `shadcn/no-raw-colors: flood-color="#00f" hardcodes a color`,
+    ])
+    expect(found(`<svg><stop stop-color="currentColor" /></svg>`)).toEqual([])
+  })
+})

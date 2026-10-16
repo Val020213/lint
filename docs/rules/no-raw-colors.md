@@ -83,7 +83,9 @@ Use `currentColor` with a text color class, or reference a theme variable:
 ````
 
 The rule checks literal strings in `fill`, `stroke`, `color`,
-`stopColor`, `floodColor`, and `lightingColor` on intrinsic elements.
+`stopColor`, `floodColor`, and `lightingColor` on intrinsic elements. In
+Svelte and Vue markup the hyphenated names `stop-color`, `flood-color`,
+and `lighting-color` are read the same way.
 Class exceptions do not exempt these attributes.
 
 A color function whose channels are a single theme variable, such as
