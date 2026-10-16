@@ -126,6 +126,10 @@ written for React holds unchanged:
 contracts: [{ pattern: "^CardTitle$", allow: ["layout", "typography"] }]
 ```
 
+A nested namespace resolves the same way. With `export * as Button from
+"./button"` in `$lib/components/ui/index.ts`, `<UI.Button.Root>` is the
+`Button` in `button.svelte`.
+
 ## What is read
 
 | Markup                             | Read as                                |

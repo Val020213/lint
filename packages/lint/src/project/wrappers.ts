@@ -6,6 +6,7 @@
 
 import * as fs from "node:fs"
 
+import { jsxElementNameOf } from "../sites/readers/jsx"
 import { walk } from "./ast"
 import {
   componentFromImport,
@@ -323,15 +324,8 @@ function sfcForwardingTags(source: string, file: string, ast: any) {
 }
 
 function jsxElementName(node: any) {
-  const name = node.name
-  if (name?.type === "JSXIdentifier") return { root: name.name, property: null }
-  if (name?.type === "JSXMemberExpression") {
-    return {
-      root: name.object?.name as string | undefined,
-      property: (name.property?.name ?? "") as string,
-    }
-  }
-  return null
+  const name = jsxElementNameOf(node.name)
+  return name ? { root: name.root || undefined, property: name.property } : null
 }
 
 // `visiting` holds the files on the current path so a wrapper cycle

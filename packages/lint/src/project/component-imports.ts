@@ -10,18 +10,21 @@ export type ComponentImport = {
 }
 
 // `<Dialog.Content>` from a named import is `DialogContent`; from a
-// namespace import it is the property alone.
+// namespace import it is the property alone. A nested `<UI.Button.Root>`
+// keeps its dotted path as the export to look up and joins it for the
+// name, so `Motion.Reorder.Root` is `MotionReorderRoot`.
 export function importNameOf(
   imported: ComponentImport,
   root: string,
   property: string | null
 ) {
-  const suffix = property !== null && !imported.namespace ? property : ""
+  const joined = property === null ? "" : property.replace(/\./g, "")
+  const suffix = imported.namespace ? "" : joined
   return {
     source: imported.source,
     exportName: imported.namespace ? (property ?? "") : imported.original,
     name: imported.namespace
-      ? (property ?? "")
+      ? joined
       : `${imported.original === "default" ? root : imported.original}${suffix}`,
     suffix,
   }

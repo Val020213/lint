@@ -13,7 +13,8 @@ import { packageRoot, resolveFile } from "./resolve"
 
 export type ExportBinding = {
   file: string
-  // `Button` for `export { Button as Action }`.
+  // `Button` for `export { Button as Action }`. `*` for a namespace: the
+  // module itself, through `export * as Button from "./button"`.
   name: string
 }
 
@@ -29,6 +30,8 @@ type ParsedModule = {
   named: { exported: string; local: string; spec: string }[]
   namedIndices: Map<string, number[]>
   stars: string[]
+  // Exported name -> specifier of `export * as Name from "spec"`.
+  namespaces: Map<string, string>
 }
 
 const parsed = new Map<string, { mtimeMs: number; module: ParsedModule }>()
@@ -72,6 +75,7 @@ function parseModule(file: string): ParsedModule {
     named: [],
     namedIndices: new Map(),
     stars: [],
+    namespaces: new Map(),
   }
   let source: string
   try {
@@ -109,7 +113,10 @@ function parseModule(file: string): ParsedModule {
     }
   }
   for (const match of source.matchAll(STAR_RE)) {
-    if (match[1]) continue
+    if (match[1]) {
+      module.namespaces.set(match[1], match[2])
+      continue
+    }
     module.stars.push(match[2])
   }
   for (let index = 0; index < module.named.length; index++) {
@@ -229,6 +236,14 @@ function collectExports(
         )
         continue
       }
+      if (imported) {
+        const target = resolveFrom(file, imported.spec)
+        exports.set(
+          exported,
+          target ? { file: target, name: "*" } : { file, name: local }
+        )
+        continue
+      }
       exports.set(exported, exports.get(local) ?? { file, name: local })
       continue
     }
@@ -236,6 +251,10 @@ function collectExports(
     if (!target) continue
     const inner = exportsOf(target, visiting, deps)
     exports.set(exported, inner.get(local) ?? { file: target, name: local })
+  }
+  for (const [exported, spec] of module.namespaces) {
+    const target = resolveFrom(file, spec)
+    if (target) exports.set(exported, { file: target, name: "*" })
   }
   for (const spec of module.stars) {
     const target = resolveFrom(file, spec)
@@ -276,6 +295,10 @@ function exportRoute(module: ParsedModule, file: string, name: string) {
         if (imported && imported.name !== "*") {
           return importedRoute(local)
         }
+        const target = imported ? resolveFrom(file, imported.spec) : null
+        if (target) {
+          return { binding: { file: target, name: "*" }, follow: false }
+        }
         name = local
         before = index
         fallback = { file, name }
@@ -294,6 +317,11 @@ function exportRoute(module: ParsedModule, file: string, name: string) {
       return module.sfc
         ? { binding: { file, name: module.defaultName }, follow: false }
         : importedRoute(module.defaultName)
+    }
+    const namespace = module.namespaces.get(name)
+    const target = namespace ? resolveFrom(file, namespace) : null
+    if (target) {
+      return { binding: { file: target, name: "*" }, follow: false }
     }
     const binding = module.local.has(name) ? { file, name } : fallback
     return binding ? { binding, follow: false } : null
@@ -327,8 +355,21 @@ function resolveBinding(file: string, name: string, deps: Set<string>) {
   return fallback
 }
 
+// `Button.Root` through `export * as Button from "./button"`: each
+// segment is looked up in the namespace the one before it names.
+function resolvePath(file: string, name: string, deps: Set<string>) {
+  const [head, ...rest] = name.split(".")
+  let binding = resolveBinding(file, head, deps)
+  for (const segment of rest) {
+    if (binding?.name !== "*") return null
+    binding = resolveBinding(binding.file, segment, deps)
+  }
+  return binding
+}
+
 // Falls back to the resolved file with the import's own name when the
-// export cannot be traced.
+// export cannot be traced. A dotted name that cannot be traced, and a
+// namespace where a component was expected, resolve to nothing.
 export function definingExportOf(
   spec: string,
   name: string,
@@ -338,14 +379,16 @@ export function definingExportOf(
   const target = resolveFrom(fromFile, spec)
   if (!target) return null
   const cached = derive(`binding:${target}\u0000${name}`, (dependencies) =>
-    resolveBinding(target, name, dependencies)
+    resolvePath(target, name, dependencies)
   )
   if (deps) {
     for (const dependency of cached.dependencies) {
       deps.add(dependency)
     }
   }
-  return cached.value ?? { file: target, name }
+  const binding = cached.value?.name === "*" ? null : cached.value
+  if (name.includes(".")) return binding
+  return binding ?? { file: target, name }
 }
 
 export function definingFileOf(spec: string, name: string, fromFile: string) {

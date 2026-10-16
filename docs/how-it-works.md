@@ -242,7 +242,8 @@ export function SaveButton({
 ```
 
 Wrapper chains can cross files and use namespace imports such as
-`<W.SaveButton>`. They are separate from the one-hop limit on class
+`<W.SaveButton>`. A nested namespace, `<UI.Button.Root>` through
+`export * as Button from "./button"`, resolves segment by segment. They are separate from the one-hop limit on class
 values. A props spread counts as forwarding only if it still contains
 `className`. If several targets qualify, the first supplies the contract.
 
