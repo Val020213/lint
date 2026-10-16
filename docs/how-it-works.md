@@ -168,7 +168,8 @@ shape class, `--text-display` makes `text-display` typography, and
 `--spacing-gutter` makes `p-gutter` spacing. A `--radius-*: initial`
 reset replaces the default names with the declared ones, so `rounded-lg`
 is unclassified until the theme declares it again. Only `@theme` blocks
-count, and relative `@import`s are followed.
+count. Scales come from the same stylesheets as your tokens: relative
+and aliased `@import`s, and packages that `themeImports` names.
 
 A class your CSS declares with `@utility` is classified by what its body
 sets, the way an arbitrary property is: `@utility heading-2xs { font-size:
@@ -176,6 +177,12 @@ sets, the way an arbitrary property is: `@utility heading-2xs { font-size:
 layout. A body that sets more than one thing takes the first appearance it
 carries. A class declared with a plain selector has no body to read and
 stays `unclassified`.
+
+The same holds for a package your theme imports. With `@import
+"tw-animate-css"`, `animate-in` comes from the package's `@theme` and
+`fade-in` or `slide-in-from-top-1` from its `@utility` rules, which set
+the custom properties its enter and exit keyframes read, so all of them
+are `motion`.
 
 Utilities Tailwind still generates under their Tailwind 3 names read as
 the utilities they are: `flex-grow` and `flex-shrink-0` classify with
@@ -238,6 +245,26 @@ Wrapper chains can cross files and use namespace imports such as
 `<W.SaveButton>`. They are separate from the one-hop limit on class
 values. A props spread counts as forwarding only if it still contains
 `className`. If several targets qualify, the first supplies the contract.
+
+Each class prop follows its own path. A wrapper that hands
+`headerClassName` to CardHeader gets CardHeader's contract for it, while
+its `className` keeps Card's:
+
+```tsx
+export function Panel({ className, headerClassName }: PanelProps) {
+  return (
+    <Card className={className}>
+      <CardHeader className={headerClassName} />
+    </Card>
+  )
+}
+
+// Checked against CardHeader's contract, not Card's.
+;<Panel headerClassName="px-6" />
+```
+
+A class prop the wrapper does not hand to a design-system component is
+not checked. In Svelte and Vue wrappers, only `class` is followed.
 
 A `render` prop forwards the same way. Base UI renders another component
 in a trigger's place, and the `className` goes with it:
