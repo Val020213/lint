@@ -502,6 +502,22 @@ function projectStatic(init: any, steps: PatternStep[]) {
   return { init: node, steps: steps.slice(i) }
 }
 
+// Svelte 5 writes a reactive value as `$derived(expr)`, which has the
+// value of `expr`. `$derived.by(fn)` is a function and stays unread.
+function derivedValueOf(init: any) {
+  const call = unwrapTs(init)
+  if (
+    call?.type !== "CallExpression" ||
+    call.callee?.type !== "Identifier" ||
+    call.callee.name !== "$derived" ||
+    call.arguments?.length !== 1 ||
+    call.arguments[0].type === "SpreadElement"
+  ) {
+    return init
+  }
+  return call.arguments[0]
+}
+
 // One hop to a same-file const's initializer. `path` holds the variables
 // on the current route, so a self-reference stops while the same variable
 // read from both branches of a ternary resolves twice. A destructured
@@ -513,7 +529,7 @@ export function resolveIdentifier(node: any, context: any, path: Set<any>) {
   const def = variable.defs?.[0]
   if (!def || def.type !== "Variable" || !def.node?.init) return null
   if (isWritten(variable)) return null
-  let init = def.node.init
+  let init = derivedValueOf(def.node.init)
   let steps: PatternStep[] = []
   if (def.name !== def.node.id) {
     const route = patternStepsOf(def.name, def.node.id)

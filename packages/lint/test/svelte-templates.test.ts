@@ -227,6 +227,42 @@ describe("Svelte templates", () => {
   })
 })
 
+describe("Svelte 5 runes", () => {
+  const runes =
+    'let active = $state(true);\n  let width = $state(40);\n  const classes = $derived(active ? "p-4" : "p-2");\n  const box = $derived(`width: ${width}px`);'
+
+  it("resolves a $derived class value the way a const resolves", () => {
+    expect(found(`<Button class={classes}>Save</Button>`, runes)).toEqual([
+      `shadcn/no-restyle: "p-4" is not allowed on <Button>: <Button> owns its spacing`,
+      `shadcn/no-restyle: "p-2" is not allowed on <Button>: <Button> owns its spacing`,
+    ])
+  })
+
+  it("reads a $derived style string property by property", () => {
+    expect(found(`<div style={box}></div>`, runes)).toEqual([
+      "shadcn/no-inline-styles: Inline style sets width",
+    ])
+    expect(
+      found(
+        `<div style={tint}></div>`,
+        "const tint = $derived(`color: ${active ? 'red' : 'blue'}`);"
+      )
+    ).toEqual(["shadcn/no-inline-styles: Inline style sets color"])
+  })
+
+  it("leaves $derived.by unread", () => {
+    expect(
+      found(
+        `<Button class={classes}>Save</Button><div style={box}></div>`,
+        "const classes = $derived.by(() => 'p-4');\n  const box = $derived.by(() => 'width: 4px');"
+      )
+    ).toEqual([
+      "shadcn/require-static-classes: Dynamically built className on <Button> cannot be checked",
+      "shadcn/no-inline-styles: Dynamic style object cannot be checked",
+    ])
+  })
+})
+
 describe("SVG color attributes in Svelte markup", () => {
   it("reads the hyphenated stop-color and flood-color names", () => {
     expect(
